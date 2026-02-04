@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/2907/2907150.png">
+    <title>我的生活助手 (v6.3 閱讀修復版)</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+    <script async src="https://www.instagram.com/embed.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: { colors: { primary: '#64748b', accent: '#f59e0b', recipe: '#ec4899' } }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        [v-cloak] { display: none !important; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .status-online { background-color: #22c55e; }
+        .status-offline { background-color: #ef4444; }
+        .status-syncing { background-color: #f59e0b; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .iframe-container { position: relative; width: 100%; padding-bottom: 120%; height: 0; overflow: hidden; }
+        .iframe-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        /* Transitions */
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex justify-center overflow-hidden">
+
+    <div id="loading-msg" class="absolute inset-0 flex flex-col items-center justify-center bg-white z-50 transition-opacity duration-500">
+        <div class="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin mb-3"></div>
+        <p class="text-gray-500 text-sm font-bold">助手啟動中...</p>
+        <p class="text-xs text-gray-300 mt-2">(v6.3 閱讀修復版)</p>
+    </div>
+
+    <div id="app" v-cloak class="w-full max-w-md h-full bg-slate-50 flex flex-col shadow-2xl relative hidden">
+        
+        <header class="px-5 py-4 bg-white shadow-sm z-10 flex justify-between items-center shrink-0">
+            <div>
+                <h1 class="text-xl font-bold text-slate-800">{{ currentTabTitle }}</h1>
+                <div class="text-xs text-slate-400">{{ todayDate }}</div>
+            </div>
+            <div class="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
+                <span :class="['status-dot', syncStatusClass]"></span>
+                <span class="text-[10px] font-medium text-slate-500">{{ syncStatusText }}</span>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-4 no-scrollbar pb-28">
+            
+            <div v-if="currentTab === 'calendar'" class="space-y-4">
+                <div class="bg-white rounded-2xl p-4 shadow-sm">
+                    <div class="flex justify-between items-center mb-4">
+                        <button @click="changeMonth(-1)" class="p-2 hover:bg-gray-100 rounded-full text-slate-500">&lt;</button>
+                        <span class="font-bold text-lg text-slate-800">{{ year }}年 {{ month }}月</span>
+                        <button @click="changeMonth(1)" class="p-2 hover:bg-gray-100 rounded-full text-slate-500">&gt;</button>
+                    </div>
+                    <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-2 font-medium"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+                    <div class="grid grid-cols-7 gap-1 text-center text-sm">
+                        <div v-for="blank in firstDayOfMonth" :key="'blank-'+blank" class="h-10"></div>
+                        <div v-for="day in daysInMonth" :key="day" @click="selectDate(day)" :class="['h-14 w-full mx-auto flex flex-col items-center justify-start rounded-lg cursor-pointer transition-all relative border border-transparent', selectedDate === day ? '!border-slate-800 bg-slate-50' : 'hover:bg-slate-50', isToday(day) ? 'text-blue-600 font-bold' : 'text-slate-700', getHoliday(day) ? 'bg-red-50' : '']">
+                            <span class="mt-1">{{ day }}</span>
+                            <span v-if="getHoliday(day)" class="text-[8px] text-red-500 leading-none px-1 text-center font-bold">{{ getHoliday(day) }}</span>
+                            <div v-if="hasTask(day)" class="mt-1 w-1 h-1 rounded-full" :class="selectedDate === day ? 'bg-slate-800' : 'bg-amber-400'"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-2xl p-4 shadow-sm border-t-4 border-slate-200">
+                    <h3 class="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2"><span>{{ month }}月{{ selectedDate }}日 行程</span><span v-if="getHoliday(selectedDate)" class="text-xs bg-red-100 text-red-500 px-2 py-0.5 rounded-full">{{ getHoliday(selectedDate) }}</span></h3>
+                    <div class="bg-slate-50 p-3 rounded-xl mb-4 space-y-2 border border-slate-100">
+                        <input v-model="calForm.title" type="text" placeholder="事項" class="w-full bg-white p-2 rounded text-sm outline-none border border-slate-200">
+                        <div class="flex gap-2">
+                            <input v-model="calForm.who" type="text" placeholder="誰" class="w-1/3 bg-white p-2 rounded text-sm outline-none border border-slate-200">
+                            <div class="flex-1 flex gap-1">
+                                <select v-model="calForm.hour" class="flex-1 bg-white p-2 rounded text-sm outline-none border border-slate-200"><option value="" disabled>時</option><option v-for="h in 24" :value="(h-1).toString().padStart(2,'0')">{{ (h-1).toString().padStart(2,'0') }}</option></select>
+                                <select v-model="calForm.minute" class="flex-1 bg-white p-2 rounded text-sm outline-none border border-slate-200"><option value="" disabled>分</option><option v-for="m in 12" :value="((m-1)*5).toString().padStart(2,'0')">{{ ((m-1)*5).toString().padStart(2,'0') }}</option></select>
+                            </div>
+                        </div>
+                        <button @click="addCalendarEvent" class="w-full bg-slate-800 text-white py-2 rounded-lg text-sm font-medium">新增至日曆</button>
+                    </div>
+                    <div v-for="(task, index) in getSelectedDateTasks" :key="index" class="flex items-start gap-3 p-3 border-b border-slate-50 last:border-0">
+                        <div class="text-xs font-bold text-slate-400 pt-1 w-10 text-right">{{ task.time }}</div>
+                        <div class="flex-1"><div class="text-slate-800 font-medium text-sm">{{ task.title }}</div><div class="text-xs text-amber-600 bg-amber-50 inline-block px-1.5 py-0.5 rounded mt-1" v-if="task.who">@{{ task.who }}</div></div>
+                        <button @click.stop="confirmRemoveCalEvent(task)" class="text-slate-300 hover:text-red-400 px-2 font-bold text-lg">&times;</button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'tasks'" class="space-y-4">
+                <div class="bg-white p-1.5 rounded-xl shadow-sm flex gap-1">
+                    <button @click="taskSubTab = 'shopping'" :class="['flex-1 py-2 text-sm font-bold rounded-lg transition', taskSubTab === 'shopping' ? 'bg-orange-500 text-white shadow' : 'text-slate-400']">🛒 購物</button>
+                    <button @click="taskSubTab = 'todo'" :class="['flex-1 py-2 text-sm font-bold rounded-lg transition', taskSubTab === 'todo' ? 'bg-slate-800 text-white shadow' : 'text-slate-400']">📝 待辦</button>
+                </div>
+                <div v-if="taskSubTab === 'shopping'" class="space-y-4">
+                    <div class="bg-white p-3 rounded-2xl shadow-sm space-y-2 border-l-4 border-orange-400">
+                        <input v-model="shopForm.text" @keyup.enter="addShopItem" type="text" placeholder="要買什麼..." class="w-full bg-transparent p-2 outline-none text-sm border-b border-orange-100">
+                        <div class="flex items-center gap-2">
+                            <input v-model="shopForm.location" @keyup.enter="addShopItem" type="text" placeholder="那裡買" class="flex-1 bg-orange-50 p-2 rounded text-xs outline-none">
+                            <button @click="addShopItem" class="bg-orange-400 text-white p-2 rounded-lg">+</button>
+                        </div>
+                    </div>
+                    <div v-for="(item, index) in shoppingList" :key="index" class="bg-white p-3 rounded-xl shadow-sm flex items-center justify-between border-l-4 border-orange-300">
+                        <div class="flex items-center gap-3">
+                            <div @click="toggleShop(index)" :class="['w-5 h-5 rounded-full border cursor-pointer flex items-center justify-center', item.bought ? 'bg-orange-300 border-orange-300' : 'border-slate-300']"><svg v-if="item.bought" class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg></div>
+                            <span :class="['text-sm', item.bought ? 'line-through text-slate-300' : 'text-slate-700 font-medium']">{{ item.text }}</span>
+                        </div>
+                        <div class="flex items-center"><div v-if="item.location" class="mr-3 text-[10px] text-orange-400">{{ item.location }}</div><button @click="removeShop(index)" class="text-slate-300 hover:text-red-400 px-2">&times;</button></div>
+                    </div>
+                </div>
+                <div v-if="taskSubTab === 'todo'" class="space-y-4">
+                    <div class="bg-white p-4 rounded-2xl shadow-sm space-y-3 border-l-4 border-slate-800">
+                        <input v-model="todoForm.text" @keyup.enter="addTodo" type="text" placeholder="輸入待辦事項..." class="w-full bg-slate-50 p-2.5 rounded-lg text-sm outline-none">
+                        <div class="flex gap-2">
+                            <input v-model="todoForm.who" type="text" placeholder="負責人" class="w-1/3 bg-slate-50 p-2 rounded-lg text-xs outline-none">
+                            <input v-model="todoForm.date" type="date" class="flex-1 bg-slate-50 p-2 rounded-lg text-xs outline-none text-slate-500">
+                            <button @click="addTodo" class="bg-slate-800 text-white px-4 rounded-lg">+</button>
+                        </div>
+                    </div>
+                    <div v-for="(item, index) in todos" :key="index" class="bg-white p-3 rounded-xl shadow-sm flex flex-col gap-2">
+                        <div class="flex items-center gap-3">
+                            <div @click="toggleTodo(index)" :class="['w-5 h-5 rounded border cursor-pointer flex items-center justify-center transition', item.done ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300']"><svg v-if="item.done" class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg></div>
+                            <span :class="['flex-1 text-sm text-slate-700', item.done ? 'line-through text-slate-300' : '']">{{ item.text }}</span>
+                            <button @click="removeTodo(index)" class="text-slate-300 hover:text-red-400">&times;</button>
+                        </div>
+                        <div class="flex justify-between items-center ml-8 pt-1 border-t border-slate-50">
+                            <div class="flex gap-2 text-[10px]"><span v-if="item.who" class="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{{ item.who }}</span><span v-if="item.date" class="bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded">{{ item.date }}</span></div>
+                            <button @click="incrementTodo(item)" class="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full transition text-[10px] font-medium"><span>打卡 {{ item.count }}</span></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'recipe'" class="space-y-4">
+                <div class="flex gap-2">
+                    <div class="bg-white p-1.5 rounded-xl shadow-sm flex gap-1 flex-1">
+                        <button @click="recipeFilter = 'main'" :class="['flex-1 py-2 text-sm font-bold rounded-lg transition', recipeFilter === 'main' ? 'bg-recipe text-white shadow' : 'text-slate-400']">🍜 主食</button>
+                        <button @click="recipeFilter = 'dessert'" :class="['flex-1 py-2 text-sm font-bold rounded-lg transition', recipeFilter === 'dessert' ? 'bg-recipe text-white shadow' : 'text-slate-400']">🍰 甜品</button>
+                    </div>
+                 </div>
+                 
+                 <div class="relative">
+                     <input v-model="recipeSearch" type="text" placeholder="搜尋食譜..." class="w-full bg-white p-3 rounded-xl shadow-sm outline-none text-sm pl-10 border border-slate-100">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-400 absolute left-3 top-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                 </div>
+
+                <div class="bg-white p-4 rounded-2xl shadow-sm space-y-3 border-l-4 border-pink-400">
+                    <input v-model="recipeForm.title" type="text" placeholder="食譜名稱..." class="w-full bg-slate-50 p-2.5 rounded-lg outline-none text-slate-700 text-sm">
+                    <input v-model="recipeForm.videoUrl" type="text" placeholder="YouTube 或 IG 連結 (自動預覽)..." class="w-full bg-slate-50 p-2.5 rounded-lg outline-none text-slate-700 text-xs">
+                    
+                    <div v-if="recipeForm.tempImages.length > 0 || recipeForm.videoPreviewUrl" class="w-full bg-slate-50 rounded-lg overflow-hidden border border-slate-200 mt-2">
+                        <div v-if="recipeForm.videoPreviewUrl" class="w-full aspect-video relative bg-black">
+                             <img :src="recipeForm.videoPreviewUrl" class="w-full h-full object-cover" v-if="!recipeForm.videoPreviewUrl.startsWith('IG:')">
+                             <div v-else class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-500 text-white font-bold text-sm">
+                                 <span class="text-3xl mb-2">📸</span>Instagram Reel
+                             </div>
+                             <div class="absolute top-2 right-2 bg-black/50 text-white px-2 py-1 text-xs rounded">預覽中</div>
+                        </div>
+                        <div v-else class="flex gap-2 overflow-x-auto p-2">
+                            <div v-for="(img, idx) in recipeForm.tempImages" :key="idx" class="relative w-16 h-16 rounded overflow-hidden border border-slate-200 shrink-0">
+                                <img :src="img" class="object-cover w-full h-full">
+                                <button @click="removeTempImage(idx)" class="absolute top-0 right-0 bg-red-500 text-white w-4 h-4 flex items-center justify-center text-[10px]">&times;</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <textarea v-model="recipeForm.content" placeholder="食材與做法..." class="w-full h-20 bg-slate-50 p-2.5 rounded-lg outline-none resize-none text-xs text-slate-600"></textarea>
+                    
+                    <div class="flex gap-2 text-xs">
+                        <label class="flex items-center gap-1 bg-slate-100 px-3 py-2 rounded-lg text-slate-500 cursor-pointer"><input type="radio" v-model="recipeForm.type" value="main"> 主食</label>
+                        <label class="flex items-center gap-1 bg-slate-100 px-3 py-2 rounded-lg text-slate-500 cursor-pointer"><input type="radio" v-model="recipeForm.type" value="dessert"> 甜品</label>
+                        <label class="flex-1 bg-pink-50 text-pink-500 rounded-lg flex items-center justify-center gap-1 py-2 cursor-pointer border border-pink-100">📷 加照片<input type="file" @change="handleRecipeImages" accept="image/*" multiple class="hidden"></label>
+                        <button @click="addRecipe" class="bg-recipe text-white px-4 rounded-lg font-bold">新增</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-3 pb-20">
+                    <div v-for="(item, index) in filteredRecipes" :key="index" @click="openRecipeModal(item)" class="bg-white p-3 rounded-xl shadow-sm flex gap-3 relative cursor-pointer hover:shadow-md transition">
+                         <div class="w-24 h-24 bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center shrink-0 border border-slate-100 relative">
+                            <img v-if="item.images && item.images.length > 0" :src="item.images[0]" class="w-full h-full object-cover">
+                            <div v-else-if="item.videoUrl && item.videoUrl.includes('instagram.com')" class="w-full h-full flex items-center justify-center bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-500 text-white text-3xl absolute inset-0">📸</div>
+                            <div v-else-if="item.videoUrl && item.videoUrl.includes('youtu')" class="w-full h-full flex items-center justify-center bg-red-600 text-white text-3xl absolute inset-0">▶</div>
+                            <span v-else class="text-2xl">🍲</span>
+                        </div>
+                        <div class="flex-1 overflow-hidden">
+                            <h4 class="font-bold text-slate-800 text-base leading-tight mb-1">{{ item.title }}</h4>
+                            <div class="text-[10px] text-pink-500 mb-1" v-if="item.videoUrl">{{ item.videoUrl.includes('instagram.com') ? '📸 Instagram' : '▶ YouTube' }}</div>
+                            <div class="text-[10px] text-slate-500 line-clamp-3 bg-slate-50 p-1.5 rounded">{{ item.content }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'edu'" class="space-y-4">
+                <div class="bg-white p-4 rounded-2xl shadow-sm space-y-3">
+                    <textarea v-model="eduForm.text" placeholder="輸入教養筆記..." class="w-full h-20 bg-slate-50 p-3 rounded-xl text-sm outline-none resize-none border border-slate-100"></textarea>
+                    <div class="flex gap-3">
+                        <label class="flex-1 bg-sky-50 text-sky-600 rounded-lg flex items-center justify-center gap-2 py-2 cursor-pointer border border-sky-100">📷 加圖片<input type="file" @change="handleEduImage" accept="image/*" class="hidden"></label>
+                        <button @click="addEduNote" class="flex-1 bg-slate-800 text-white rounded-lg py-2 text-xs font-bold">新增筆記</button>
+                    </div>
+                </div>
+                <div v-for="(item, index) in eduList" :key="index" class="bg-white p-4 rounded-xl shadow-sm flex flex-col gap-3">
+                    <div v-if="item.type === 'text'" class="text-slate-700 text-sm whitespace-pre-wrap">{{ item.content }}</div>
+                    <img v-else :src="item.content" class="w-full rounded-lg bg-slate-100">
+                    <div class="flex justify-between items-center pt-2 border-t border-slate-50">
+                        <span class="text-[10px] text-slate-400">{{ item.date }}</span>
+                        <div class="flex items-center gap-4">
+                            <button @click="incrementShare(item)" class="flex items-center gap-1.5 text-sky-600 bg-sky-50 px-3 py-1 rounded-full"><span class="text-xs font-bold">分享 {{ item.shareCount }} 次</span></button>
+                            <button @click="removeEdu(index)" class="text-slate-300 hover:text-red-400">&times;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'book'" class="space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div @click="toggleBookFilter('Kobe')" :class="['p-3 rounded-xl text-center shadow-sm border-b-2 cursor-pointer transition', bookFilter === 'Kobe' ? 'bg-indigo-50 border-indigo-500' : 'bg-white border-indigo-400']">
+                        <div class="text-xs text-slate-400 font-bold mb-1">Kobe 讀了</div>
+                        <div class="text-2xl font-bold text-indigo-500">{{ stats.kobe }} <span class="text-xs text-slate-300">本</span></div>
+                    </div>
+                    <div @click="toggleBookFilter('Luka')" :class="['p-3 rounded-xl text-center shadow-sm border-b-2 cursor-pointer transition', bookFilter === 'Luka' ? 'bg-teal-50 border-teal-500' : 'bg-white border-teal-400']">
+                        <div class="text-xs text-slate-400 font-bold mb-1">Luka 讀了</div>
+                        <div class="text-2xl font-bold text-teal-500">{{ stats.luka }} <span class="text-xs text-slate-300">本</span></div>
+                    </div>
+                </div>
+                
+                <div class="bg-white p-3 rounded-xl shadow-sm border border-indigo-100 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    <input v-model="localBookSearch" type="text" placeholder="搜尋已記錄的書..." class="flex-1 outline-none text-sm text-slate-700">
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl shadow-sm space-y-3 border-l-4 border-indigo-400 relative">
+                    <div class="flex gap-2">
+                        <input v-model="bookForm.searchText" @keyup.enter="searchBooks" type="text" placeholder="新增: 網上搜書名..." class="flex-1 bg-slate-50 p-2 rounded-lg text-sm outline-none">
+                        <button @click="searchBooks" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap">
+                            <span v-if="isSearching">...</span>
+                            <span v-else>🔍 搜書</span>
+                        </button>
+                    </div>
+                    <div v-if="searchResults.length > 0" class="bg-slate-50 rounded-lg p-2 border max-h-60 overflow-y-auto space-y-2">
+                        <div v-for="book in searchResults" :key="book.title" @click="selectBook(book)" class="flex gap-3 bg-white p-2 rounded cursor-pointer items-center border border-slate-100 hover:bg-indigo-50">
+                            <img :src="book.cover || 'https://via.placeholder.com/50'" class="w-10 h-14 object-cover rounded shadow-sm">
+                            <div class="flex-1 font-bold text-xs">{{ book.title }} <br><span class="text-gray-400 font-normal">{{ book.author }}</span></div>
+                        </div>
+                    </div>
+                    <div v-if="bookForm.title" class="pt-2 border-t border-slate-100 space-y-3 animate-fade-in">
+                        <div class="flex items-center gap-3 bg-indigo-50 p-2 rounded">
+                            <img v-if="bookForm.tempCover" :src="bookForm.tempCover" class="w-10 h-14 object-cover rounded">
+                            <div class="flex-1 font-bold text-sm text-indigo-900">{{ bookForm.title }}</div>
+                            <button @click="clearSelection" class="text-xs text-red-500">重選</button>
+                        </div>
+                        <div class="flex gap-2 text-xs">
+                            <button @click="toggleReader('Kobe')" :class="['flex-1 py-2 rounded-lg transition font-bold', bookForm.readers.includes('Kobe') ? 'bg-indigo-500 text-white' : 'bg-slate-100']">Kobe</button>
+                            <button @click="toggleReader('Luka')" :class="['flex-1 py-2 rounded-lg transition font-bold', bookForm.readers.includes('Luka') ? 'bg-teal-500 text-white' : 'bg-slate-100']">Luka</button>
+                        </div>
+                        <div class="flex gap-2 items-center">
+                            <input v-model="bookForm.date" type="date" class="flex-1 bg-slate-50 p-2 rounded-lg text-xs outline-none">
+                            <button @click="addBook" class="bg-indigo-600 text-white px-6 py-2 rounded-lg text-xs font-bold">確認新增</button>
+                        </div>
+                    </div>
+                </div>
+                <div v-for="(book, index) in filteredBooks" :key="book.id" class="bg-white p-3 rounded-xl shadow-sm flex gap-3 relative">
+                    <div class="w-16 h-24 bg-slate-100 rounded-lg overflow-hidden shrink-0 border border-slate-100 shadow-inner">
+                        <img v-if="book.cover" :src="book.cover" class="w-full h-full object-cover">
+                        <span v-else class="text-2xl flex items-center justify-center h-full">📚</span>
+                    </div>
+                    <div class="flex-1 flex flex-col justify-center">
+                        <h4 class="font-bold text-slate-800 text-sm leading-tight">{{ book.title }}</h4>
+                        <div class="text-[10px] text-slate-400 mb-2">{{ book.date }}</div>
+                        <div class="flex gap-1"><span v-for="reader in book.readers" class="px-2 py-0.5 rounded text-[10px] font-bold text-white bg-indigo-400">{{ reader }}</span></div>
+                    </div>
+                    <button @click="confirmRemoveBook(book)" class="absolute top-2 right-2 text-slate-300 hover:text-red-400 font-bold p-2">&times;</button>
+                </div>
+            </div>
+
+        </main>
+
+        <transition name="modal">
+            <div v-if="showRecipeModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                <div class="bg-white w-full max-w-md max-h-[85vh] rounded-2xl overflow-hidden flex flex-col shadow-2xl modal-container">
+                    
+                    <div v-if="!isEditingRecipe" class="flex flex-col h-full overflow-hidden">
+                        <div class="w-full bg-black shrink-0 relative aspect-video bg-gray-900">
+                            <div v-if="getEmbedUrl(recipeInView.videoUrl)" class="w-full h-full"><iframe :src="getEmbedUrl(recipeInView.videoUrl)" class="w-full h-full" frameborder="0" allowfullscreen></iframe></div>
+                            <div v-else-if="recipeInView.videoUrl && recipeInView.videoUrl.includes('instagram.com')" class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-500 p-4">
+                                <span class="text-3xl mb-2 text-white">📸</span>
+                                <a :href="recipeInView.videoUrl" target="_blank" class="bg-white text-pink-600 px-4 py-2 rounded-full text-xs font-bold shadow-lg">在 Instagram 開啟影片</a>
+                            </div>
+                            <div v-else class="w-full h-full overflow-x-auto flex snap-x snap-mandatory"><div v-if="recipeInView.images && recipeInView.images.length > 0" v-for="(img, i) in recipeInView.images" :key="i" class="w-full h-full shrink-0 snap-center relative"><img :src="img" class="w-full h-full object-contain"><span v-if="recipeInView.images.length > 1" class="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 rounded">{{ i+1 }}/{{ recipeInView.images.length }}</span></div><div v-else class="w-full h-full flex items-center justify-center text-4xl text-white">🍲</div></div>
+                            <button @click="showRecipeModal = false" class="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1 z-10">&times;</button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-5 min-h-0 bg-white">
+                            <div class="flex justify-between items-start mb-2"><h2 class="text-xl font-bold text-slate-800">{{ recipeInView.title }}</h2><span class="px-2 py-1 rounded text-xs font-bold text-white bg-recipe">{{ recipeInView.type === 'main' ? '主食' : '甜品' }}</span></div>
+                            <p class="text-slate-600 text-sm whitespace-pre-wrap leading-relaxed">{{ recipeInView.content }}</p>
+                        </div>
+                        <div class="p-4 border-t border-slate-100 flex gap-3 shrink-0 bg-white">
+                            <button @click="confirmDeleteRecipe(recipeInView)" class="flex-1 py-2 text-red-500 font-bold bg-red-50 rounded-lg">刪除</button>
+                            <button @click="startEditRecipe" class="flex-1 py-2 text-white font-bold bg-slate-800 rounded-lg">編輯</button>
+                        </div>
+                    </div>
+
+                    <div v-else class="flex flex-col h-full overflow-hidden bg-white">
+                        <div class="flex-1 overflow-y-auto p-4 gap-3 flex flex-col min-h-0">
+                            <h3 class="font-bold text-lg text-slate-800">編輯食譜</h3>
+                            <input v-model="recipeEditForm.title" class="bg-slate-50 p-3 rounded-lg border border-slate-200" placeholder="食譜名稱">
+                            <input v-model="recipeEditForm.videoUrl" class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs" placeholder="YouTube/IG Link">
+                            <textarea v-model="recipeEditForm.content" class="bg-slate-50 p-3 rounded-lg border border-slate-200 h-40 resize-none shrink-0" placeholder="做法..."></textarea>
+                            <div class="flex gap-2"><label class="bg-pink-50 text-pink-500 px-4 py-2 rounded-lg cursor-pointer text-xs flex-1 text-center font-bold">📷 更換/加相<input type="file" @change="handleEditRecipeImages" accept="image/*" multiple class="hidden"></label></div>
+                            <div class="flex gap-2 overflow-x-auto pb-2"><div v-for="(img, idx) in recipeEditForm.tempImages" :key="idx" class="relative w-20 h-20 rounded border shrink-0"><img :src="img" class="object-cover w-full h-full"><button @click="removeEditImage(idx)" class="absolute top-0 right-0 bg-red-500 text-white w-5 h-5 flex items-center justify-center text-xs">&times;</button></div></div>
+                        </div>
+                        <div class="p-4 border-t border-slate-100 flex gap-3 shrink-0 bg-white">
+                            <button @click="isEditingRecipe = false" class="flex-1 py-3 text-slate-500 font-bold bg-slate-100 rounded-lg">取消</button>
+                            <button @click="saveEditedRecipe" class="flex-1 py-3 text-white font-bold bg-recipe rounded-lg">儲存</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+        <nav class="absolute bottom-0 w-full bg-white border-t border-slate-100 px-2 py-2 flex justify-between items-center z-20 pb-6 shrink-0 text-slate-400">
+            <button @click="currentTab = 'calendar'" :class="['flex flex-col items-center gap-1 w-1/5', currentTab === 'calendar' ? 'text-slate-800' : '']"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><span class="text-[10px] font-bold">日曆</span></button>
+            <button @click="currentTab = 'tasks'" :class="['flex flex-col items-center gap-1 w-1/5', currentTab === 'tasks' ? 'text-slate-800' : '']"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg><span class="text-[10px] font-bold">任務</span></button>
+            <button @click="currentTab = 'recipe'" :class="['flex flex-col items-center gap-1 w-1/5', currentTab === 'recipe' ? 'text-pink-500' : '']"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg><span class="text-[10px] font-bold">食譜</span></button>
+            <button @click="currentTab = 'edu'" :class="['flex flex-col items-center gap-1 w-1/5', currentTab === 'edu' ? 'text-slate-800' : '']"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 14l9-5-9-5-9 5 9 5z" /><path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14zm-4 6v-7.5l4-2.222" /></svg><span class="text-[10px] font-bold">教養</span></button>
+            <button @click="currentTab = 'book'" :class="['flex flex-col items-center gap-1 w-1/5', currentTab === 'book' ? 'text-slate-800' : '']"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg><span class="text-[10px] font-bold">閱讀</span></button>
+        </nav>
+    </div>
+
+    <script type="module">
+        import { createApp, ref, computed, reactive, watch, toRaw, nextTick } from 'https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.esm-browser.js';
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = { apiKey: "AIzaSyBm-HP5HO5cCbT7ciiye5ZzoMW5BDa6_EI", authDomain: "my-family-app-8dd29.firebaseapp.com", projectId: "my-family-app-8dd29", storageBucket: "my-family-app-8dd29.firebasestorage.app", messagingSenderId: "505912170720", appId: "1:505912170720:web:e8a5d42e6c5cef062d1885", measurementId: "G-J0SZDCDM16" };
+        const firebaseApp = initializeApp(firebaseConfig);
+        const db = getFirestore(firebaseApp);
+
+        createApp({
+            setup() {
+                const currentTab = ref('calendar');
+                const taskSubTab = ref('shopping');
+                const LOCAL_IMG_KEY = 'my-family-app-images';
+                const localImages = JSON.parse(localStorage.getItem(LOCAL_IMG_KEY) || '{"eduImages": [], "bookCovers": [], "recipeImages": []}');
+                
+                const calendarEvents = ref([]); const todos = ref([]); const shoppingList = ref([]); const eduList = ref([]); const bookList = ref([]); const recipeList = ref([]);
+                const isSearching = ref(false); const syncStatus = ref('offline');
+                const syncStatusText = computed(() => syncStatus.value === 'online' ? '已同步' : syncStatus.value === 'syncing' ? '同步中...' : '離線');
+                const syncStatusClass = computed(() => `status-${syncStatus.value}`);
+                let isRemoteUpdate = false; const docRef = doc(db, "familyApp", "sharedData");
+
+                // MISSING FUNCTION ADDED HERE
+                const getIgId = (u) => { if(!u) return null; let m = u.match(/(?:p|reel|reels)\/([a-zA-Z0-9_-]+)/); return m ? m[1] : null; };
+
+                // Auto-start mechanism (Force show UI if Firebase hangs)
+                setTimeout(() => {
+                    document.querySelector('#loading-msg').style.display = 'none'; 
+                    document.querySelector('#app').classList.remove('hidden');
+                }, 3000);
+
+                // Sync
+                onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        isRemoteUpdate = true; const data = docSnap.data();
+                        calendarEvents.value = data.calendarEvents || []; todos.value = data.todos || []; shoppingList.value = data.shoppingList || [];
+                        const remoteEdu = data.eduList || []; const localEduImages = localImages.eduImages || []; eduList.value = [...remoteEdu, ...localEduImages].sort((a,b) => new Date(b.date) - new Date(a.date));
+                        const remoteBooks = data.bookList || []; const localCovers = localImages.bookCovers || []; bookList.value = remoteBooks.map(book => { if (book.cover && book.cover.startsWith('http')) return book; const foundCover = localCovers.find(c => c.id === book.id); return { ...book, cover: foundCover ? foundCover.cover : null }; }).sort((a,b) => new Date(b.date) - new Date(a.date));
+                        const remoteRecipes = data.recipeList || []; const localRecipeImages = localImages.recipeImages || []; recipeList.value = remoteRecipes.map(r => { const foundRecord = localRecipeImages.find(img => img.id === r.id); let imgs = []; if (foundRecord) { if (foundRecord.images) imgs = foundRecord.images; else if (foundRecord.image) imgs = [foundRecord.image]; } return { ...r, images: imgs }; });
+                        syncStatus.value = 'online'; 
+                        setTimeout(() => isRemoteUpdate = false, 500);
+                    } else { setDoc(docRef, { calendarEvents: [], todos: [], shoppingList: [], eduList: [], bookList: [], recipeList: [] }); syncStatus.value = 'online'; }
+                });
+
+                let saveTimeout = null;
+                const saveToCloud = () => {
+                    if (isRemoteUpdate) return; syncStatus.value = 'syncing'; clearTimeout(saveTimeout);
+                    saveTimeout = setTimeout(async () => {
+                        try {
+                            const eduTextOnly = eduList.value.filter(item => item.type === 'text');
+                            const booksForCloud = bookList.value.map(b => (b.cover && b.cover.startsWith('http')) ? b : { ...b, cover: null });
+                            const recipesForCloud = recipeList.value.map(({ images, ...rest }) => rest);
+                            await setDoc(docRef, { calendarEvents: toRaw(calendarEvents.value), todos: toRaw(todos.value), shoppingList: toRaw(shoppingList.value), eduList: toRaw(eduTextOnly), bookList: toRaw(booksForCloud), recipeList: toRaw(recipesForCloud) }, { merge: true });
+                            syncStatus.value = 'online';
+                        } catch (e) { syncStatus.value = 'offline'; }
+                    }, 1000);
+                };
+
+                watch([calendarEvents, todos, shoppingList], saveToCloud, { deep: true });
+                watch(eduList, (nv) => { localImages.eduImages = nv.filter(i => i.type === 'image'); localStorage.setItem(LOCAL_IMG_KEY, JSON.stringify(localImages)); saveToCloud(); }, { deep: true });
+                watch(bookList, (nv) => { localImages.bookCovers = nv.filter(b => b.cover && !b.cover.startsWith('http')).map(b => ({ id: b.id, cover: b.cover })); localStorage.setItem(LOCAL_IMG_KEY, JSON.stringify(localImages)); saveToCloud(); }, { deep: true });
+                watch(recipeList, (nv) => { localImages.recipeImages = nv.filter(r => r.images && r.images.length > 0).map(r => ({ id: r.id, images: r.images })); localStorage.setItem(LOCAL_IMG_KEY, JSON.stringify(localImages)); saveToCloud(); }, { deep: true });
+
+                const now = new Date(); const year = ref(now.getFullYear()); const month = ref(now.getMonth() + 1); const selectedDate = ref(now.getDate());
+                const calForm = reactive({ title: '', who: '', hour: '', minute: '' });
+                const daysInMonth = computed(() => new Date(year.value, month.value, 0).getDate());
+                const firstDayOfMonth = computed(() => new Date(year.value, month.value - 1, 1).getDay());
+                const vicHolidays2026 = { '2026-1-1': "New Year's Day", '2026-1-26': "Australia Day", '2026-3-9': "Labour Day", '2026-4-3': "Good Friday", '2026-4-4': "Saturday before Easter", '2026-4-5': "Easter Sunday", '2026-4-6': "Easter Monday", '2026-4-25': "Anzac Day", '2026-6-8': "King's Birthday", '2026-11-3': "Melbourne Cup", '2026-12-25': "Christmas Day", '2026-12-26': "Boxing Day" };
+                const getHoliday = (d) => vicHolidays2026[`${year.value}-${month.value}-${d}`] || null;
+                const changeMonth = (d) => { month.value += d; if (month.value > 12) { month.value = 1; year.value++; } if (month.value < 1) { month.value = 12; year.value--; } selectedDate.value = 1; };
+                const selectDate = (d) => selectedDate.value = d;
+                const isToday = (d) => (new Date()).getFullYear() === year.value && (new Date()).getMonth() + 1 === month.value && (new Date()).getDate() === d;
+                const hasTask = (d) => calendarEvents.value.some(e => e.date === `${year.value}-${month.value}-${d}`);
+                const getSelectedDateTasks = computed(() => calendarEvents.value.filter(e => e.date === `${year.value}-${month.value}-${selectedDate.value}`).sort((a,b) => a.time.localeCompare(b.time)));
+                const addCalendarEvent = () => { if(calForm.title.trim()) { let t = '全日'; if (calForm.hour && calForm.minute) t = `${calForm.hour}:${calForm.minute}`; calendarEvents.value.push({ date: `${year.value}-${month.value}-${selectedDate.value}`, title: calForm.title, who: calForm.who, time: t }); calForm.title = ''; calForm.who = ''; calForm.hour = ''; calForm.minute = ''; } };
+                const confirmRemoveCalEvent = (task) => { if(confirm('確定要刪除這個行程嗎？')) { let i = calendarEvents.value.indexOf(task); if(i>-1) calendarEvents.value.splice(i, 1); } };
+                const removeCalEvent = confirmRemoveCalEvent; 
+
+                const todoForm = reactive({ text: '', who: '', date: '' });
+                const addTodo = () => { if (todoForm.text.trim()) { todos.value.unshift({ text: todoForm.text, who: todoForm.who, date: todoForm.date, done: false, count: 0 }); todoForm.text = ''; } };
+                const removeTodo = (i) => todos.value.splice(i, 1);
+                const toggleTodo = (i) => todos.value[i].done = !todos.value[i].done;
+                const incrementTodo = (t) => t.count++;
+                const shopForm = reactive({ text: '', location: '' });
+                const addShopItem = () => { if (shopForm.text.trim()) { shoppingList.value.unshift({ text: shopForm.text, location: shopForm.location, bought: false }); shopForm.text = ''; shopForm.location = ''; } };
+                const removeShop = (i) => shoppingList.value.splice(i, 1);
+                const toggleShop = (i) => shoppingList.value[i].bought = !shoppingList.value[i].bought;
+
+                const recipeSearch = ref(''); const recipeFilter = ref('main'); const recipeForm = reactive({ title: '', content: '', videoUrl: '', type: 'main', tempImages: [], videoPreviewUrl: null });
+                const filteredRecipes = computed(() => {
+                    let r = recipeList.value.filter(x => x.type === recipeFilter.value);
+                    if (recipeSearch.value.trim()) { let k = recipeSearch.value.toLowerCase(); r = r.filter(x => x.title.toLowerCase().includes(k) || x.content.toLowerCase().includes(k)); }
+                    return r;
+                });
+                
+                watch(() => recipeForm.videoUrl, (url) => {
+                    if(!url) { recipeForm.videoPreviewUrl = null; return; }
+                    let ytMatch = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
+                    if (ytMatch && ytMatch[2].length === 11) {
+                        recipeForm.videoPreviewUrl = `https://img.youtube.com/vi/${ytMatch[2]}/mqdefault.jpg`;
+                    } else if (url.includes('instagram.com')) {
+                        recipeForm.videoPreviewUrl = url; 
+                    } else {
+                        recipeForm.videoPreviewUrl = null;
+                    }
+                });
+
+                const handleRecipeImages = (e) => { let f = e.target.files; if (f) { for (let i=0; i<f.length; i++) { let r = new FileReader(); r.onload = (ev) => recipeForm.tempImages.push(ev.target.result); r.readAsDataURL(f[i]); } } };
+                const removeTempImage = (i) => recipeForm.tempImages.splice(i, 1);
+                const addRecipe = () => { 
+                    if (recipeForm.title.trim()) { 
+                        let imgs = [...recipeForm.tempImages];
+                        if (imgs.length === 0 && recipeForm.videoPreviewUrl && !recipeForm.videoPreviewUrl.includes('instagram.com')) {
+                            imgs.push(recipeForm.videoPreviewUrl);
+                        }
+                        recipeList.value.unshift({ id: Date.now().toString(), title: recipeForm.title, content: recipeForm.content, type: recipeForm.type, videoUrl: recipeForm.videoUrl, images: imgs }); 
+                        recipeForm.title = ''; recipeForm.content = ''; recipeForm.videoUrl = ''; recipeForm.tempImages = []; 
+                    } 
+                };
+                const confirmDeleteRecipe = (t) => { if (confirm('確定要刪除嗎？')) { let i = recipeList.value.indexOf(t); if (i>-1) recipeList.value.splice(i, 1); showRecipeModal.value = false; } };
+                const showRecipeModal = ref(false); const isEditingRecipe = ref(false); const recipeInView = ref({}); const recipeEditForm = reactive({ title: '', content: '', type: '', videoUrl: '', tempImages: [] });
+                const getEmbedUrl = (u) => { if (!u) return null; let m = u.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/); return (m && m[2].length === 11) ? 'https://www.youtube.com/embed/' + m[2] : null; };
+                
+                const openRecipeModal = (t) => { 
+                    recipeInView.value = t; 
+                    isEditingRecipe.value = false; 
+                    showRecipeModal.value = true;
+                    // Trigger IG Embed Processing
+                    nextTick(() => { if (window.instgrm) window.instgrm.Embeds.process(); });
+                };
+                
+                const startEditRecipe = () => { isEditingRecipe.value = true; Object.assign(recipeEditForm, { title: recipeInView.value.title, content: recipeInView.value.content, type: recipeInView.value.type, videoUrl: recipeInView.value.videoUrl || '', tempImages: [...(recipeInView.value.images || [])] }); };
+                const handleEditRecipeImages = (e) => { let f = e.target.files; if (f) { for (let i=0; i<f.length; i++) { let r = new FileReader(); r.onload = (ev) => recipeEditForm.tempImages.push(ev.target.result); r.readAsDataURL(f[i]); } } };
+                const removeEditImage = (i) => recipeEditForm.tempImages.splice(i, 1);
+                const saveEditedRecipe = () => { 
+                    if (recipeEditForm.tempImages.length === 0 && recipeEditForm.videoUrl) {
+                        let ytMatch = recipeEditForm.videoUrl.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
+                        if (ytMatch && ytMatch[2].length === 11) recipeEditForm.tempImages.push(`https://img.youtube.com/vi/${ytMatch[2]}/mqdefault.jpg`);
+                    }
+                    Object.assign(recipeInView.value, { title: recipeEditForm.title, content: recipeEditForm.content, type: recipeEditForm.type, videoUrl: recipeEditForm.videoUrl, images: [...recipeEditForm.tempImages] }); isEditingRecipe.value = false; saveToCloud(); 
+                };
+
+                const eduForm = reactive({ text: '' });
+                const addEduNote = () => { if(eduForm.text.trim()){ eduList.value.unshift({ type: 'text', content: eduForm.text, date: new Date().toLocaleDateString(), shareCount: 0 }); eduForm.text = ''; } };
+                const handleEduImage = (e) => { let f = e.target.files[0]; if (f) { let r = new FileReader(); r.onload = (ev) => eduList.value.unshift({ type: 'image', content: ev.target.result, date: new Date().toLocaleDateString(), shareCount: 0 }); r.readAsDataURL(f); } };
+                const removeEdu = (i) => eduList.value.splice(i, 1);
+                const incrementShare = (t) => t.shareCount++;
+
+                const bookForm = reactive({ searchText: '', title: '', readers: [], date: new Date().toISOString().split('T')[0], tempCover: null });
+                const searchResults = ref([]); const bookFilter = ref('all'); const localBookSearch = ref('');
+                const stats = computed(() => ({ kobe: bookList.value.filter(b => b.readers.includes('Kobe')).length, luka: bookList.value.filter(b => b.readers.includes('Luka')).length }));
+                const filteredBooks = computed(() => { let r = bookList.value; if (bookFilter.value !== 'all') r = r.filter(b => b.readers.includes(bookFilter.value)); if (localBookSearch.value.trim()) { let k = localBookSearch.value.toLowerCase(); r = r.filter(b => b.title.toLowerCase().includes(k)); } return r; });
+                const toggleBookFilter = (n) => bookFilter.value = (bookFilter.value === n) ? 'all' : n;
+                const toggleReader = (n) => bookForm.readers.includes(n) ? bookForm.readers = bookForm.readers.filter(x => x !== n) : bookForm.readers.push(n);
+                
+                // *** APPLE iTUNES SEARCH API (Stable) ***
+                const searchBooks = async () => { 
+                    if (!bookForm.searchText.trim()) return alert("請輸入書名關鍵字"); 
+                    isSearching.value = true; 
+                    searchResults.value = []; 
+                    try { 
+                        // Apple API (CORS Friendly)
+                        let res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(bookForm.searchText)}&entity=ebook&limit=10`);
+                        let d = await res.json(); 
+                        if (d.results && d.results.length > 0) {
+                            searchResults.value = d.results.map(item => ({
+                                title: item.trackName,
+                                author: item.artistName,
+                                // High res cover
+                                cover: item.artworkUrl100 ? item.artworkUrl100.replace('100x100', '400x400') : null
+                            }));
+                        } else {
+                            alert("找不到相關書本");
+                        }
+                    } catch (e) { 
+                        console.error(e);
+                        alert("搜尋失敗 (Apple API 錯誤)"); 
+                    } finally {
+                        isSearching.value = false;
+                    }
+                };
+                
+                const selectBook = (b) => { bookForm.title = b.title; bookForm.tempCover = b.cover; searchResults.value = []; bookForm.searchText = ''; };
+                const clearSelection = () => { bookForm.title = ''; bookForm.tempCover = null; };
+                const addBook = () => { if (bookForm.title.trim()) { bookList.value.unshift({ id: Date.now().toString(), title: bookForm.title, readers: [...bookForm.readers], date: bookForm.date, cover: bookForm.tempCover }); bookForm.title = ''; bookForm.readers = []; bookForm.tempCover = null; bookForm.searchText = ''; } };
+                const confirmRemoveBook = (t) => { if (confirm('確定要刪除這本書的閱讀記錄嗎？')) { let i = bookList.value.indexOf(t); if(i>-1) bookList.value.splice(i, 1); } };
+
+                const currentTabTitle = computed(() => ({ calendar: '行程日曆', tasks: '任務中心', recipe: '私房食譜', edu: '教養筆記', book: '閱讀存摺' }[currentTab.value]));
+                const todayDate = computed(() => new Date().toLocaleDateString('zh-TW', { weekday: 'long', month: 'long', day: 'numeric' }));
+
+                return { 
+                    currentTab, currentTabTitle, todayDate, syncStatusText, syncStatusClass, 
+                    year, month, daysInMonth, firstDayOfMonth, selectedDate, calForm, changeMonth, selectDate, isToday, hasTask, getSelectedDateTasks, addCalendarEvent, removeCalEvent, confirmRemoveCalEvent, getHoliday, 
+                    taskSubTab, todoForm, todos, addTodo, removeTodo, toggleTodo, incrementTodo, shopForm, shoppingList, addShopItem, removeShop, toggleShop, 
+                    recipeSearch, recipeFilter, recipeForm, filteredRecipes, handleRecipeImages, removeTempImage, addRecipe, confirmDeleteRecipe, showRecipeModal, isEditingRecipe, recipeInView, openRecipeModal, startEditRecipe, recipeEditForm, handleEditRecipeImages, removeEditImage, saveEditedRecipe, getEmbedUrl, getIgId, 
+                    eduForm, eduList, addEduNote, handleEduImage, removeEdu, incrementShare, 
+                    bookList, bookForm, toggleReader, addBook, confirmRemoveBook, searchBooks, isSearching, searchResults, selectBook, clearSelection, stats, bookFilter, toggleBookFilter, filteredBooks, localBookSearch 
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
